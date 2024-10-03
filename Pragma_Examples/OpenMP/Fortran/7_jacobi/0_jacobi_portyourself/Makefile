@@ -15,6 +15,9 @@ ifeq ($(findstring -w amdflang-new,$(FC1)), amdflang-new)
 else ifeq ($(findstring -w flang,$(FC1)), flang)
   OPENMP_FLAGS = -fopenmp 
   FREE_FORM_FLAG = -Mfreeform
+else ifeq ($(findstring flang-new,$(FC1)), flang-new)
+  OPENMP_FLAGS = -fopenmp
+  FREE_FORM_FLAG = -ffree-form
 else ifeq ($(findstring gfortran,$(FC1)), gfortran)
   OPENMP_FLAGS = -fopenmp
   FREE_FORM_FLAG = -ffree-form
@@ -26,6 +29,8 @@ ifeq ($(findstring ftn,$(FC1)), ftn)
   FFLAGS = -G2 -O3 ${FREE_FORM_FLAG} ${OPENMP_FLAGS}
 else ifeq ($(findstring amdflang-new,$(FC1)), amdflang-new)
   FFLAGS = -g -O3 -ffast-math ${FREE_FORM_FLAG} ${OPENMP_FLAGS}
+else ifeq ($(findstring flang-new,$(FC1)), flang-new)
+  FFLAGS = -g -O3 -ffast-math ${FREE_FORM_FLAG} ${OPENMP_FLAGS}
 else
   FFLAGS = -g -O3 ${FREE_FORM_FLAG} -fstrict-aliasing ${OPENMP_FLAGS}
 endif
@@ -36,6 +41,7 @@ else
 endif
 
 OBJS= \
+	prec.o \
 	mesh.o \
 	input.o \
 	norm.o \
@@ -45,12 +51,12 @@ OBJS= \
 	jacobi.o \
 	main.o \
 
-boundary.o: mesh.o
-input.o: mesh.o
-jacobi.o: input.o mesh.o norm.o laplacian.o boundary.o update.o
-laplacian.o: mesh.o
-norm.o: mesh.o
-update.o: mesh.o
+boundary.o: prec.o mesh.o
+input.o: prec.o mesh.o
+jacobi.o: prec.o input.o mesh.o norm.o laplacian.o boundary.o update.o
+laplacian.o: prec.o mesh.o
+norm.o: prec.o mesh.o
+update.o: prec.o mesh.o
 main.o: mesh.o jacobi.o
 
 %.o : %.f90 Makefile
