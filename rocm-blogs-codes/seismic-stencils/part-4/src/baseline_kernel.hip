@@ -36,7 +36,7 @@ template void init_fd_z_gpu<RADIUS>(const float*);
 #define BLOCK_DIM_X 64
 #define BLOCK_DIM_Y 4
 #elif RADIUS == 6
-#define BLOCK_DIM_X 32
+#define BLOCK_DIM_X 64
 #define BLOCK_DIM_Y 4
 #elif RADIUS == 8
 #define BLOCK_DIM_X 64

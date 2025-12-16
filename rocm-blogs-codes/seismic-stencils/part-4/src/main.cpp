@@ -18,34 +18,29 @@
 void print_help(const char* program_name) {
     printf("Seismic Stencils - 3D Finite Difference Stencil Computation\n");
     printf("=============================================================\n\n");
-    printf("Usage: %s [nx] [ny] [nz] [nt] [nw] [align]\n\n", program_name);
-    printf("Arguments (all optional, positional):\n");
-    printf("  nx      Grid size in x-direction          [default: 512]\n");
-    printf("  ny      Grid size in y-direction          [default: 512]\n");
-    printf("  nz      Grid size in z-direction          [default: 512]\n");
-    printf("  nt      Number of iterations              [default: 100]\n");
-    printf("  nw      Z-window size for sliding window  [default: 1]\n");
-    printf("  align   Alignment factor for leading dim  [default: 1]\n\n");
+    printf("Usage: %s [OPTIONS]\n\n", program_name);
+    printf("Options:\n");
+    printf("  -nx <val>     Grid size in x-direction          [default: 512]\n");
+    printf("  -ny <val>     Grid size in y-direction          [default: 512]\n");
+    printf("  -nz <val>     Grid size in z-direction          [default: 512]\n");
+    printf("  -nt <val>     Number of iterations              [default: 100]\n");
+    printf("  -nw <val>     Z-window size for sliding window  [default: radius-dependent]\n");
+    printf("  -align <val>  Alignment factor for leading dim  [default: radius-dependent]\n");
+    printf("  -h, --help    Show this help message\n\n");
     printf("Compile-time settings (current build):\n");
     printf("  RADIUS  = %d (stencil radius, %s order accuracy)\n", RADIUS,
            RADIUS == 1 ? "2nd" : RADIUS == 2 ? "4th" : RADIUS == 3 ? "6th" :
            RADIUS == 4 ? "8th" : RADIUS == 6 ? "12th" : RADIUS == 8 ? "16th" : "unknown");
     printf("  VEC_LEN = %d (vector length, 2^VEC_EXP)\n\n", VEC_LEN);
     printf("Examples:\n");
-    printf("  %s                           # 512^3 grid, 100 iterations\n", program_name);
-    printf("  %s 256 256 256               # 256^3 grid\n", program_name);
-    printf("  %s 1024 1024 1024 50         # 1024^3 grid, 50 iterations\n", program_name);
-    printf("  %s 512 512 512 100 1 64      # With alignment = 64\n\n", program_name);
+    printf("  %s                                    # 512^3 grid, 100 iterations\n", program_name);
+    printf("  %s -nx 256 -ny 256 -nz 256            # 256^3 grid\n", program_name);
+    printf("  %s -nx 1024 -ny 1024 -nz 1024 -nt 50 # 1024^3 grid, 50 iterations\n", program_name);
+    printf("  %s -nx 512 -ny 512 -nz 512 -nw 128 -align 64\n\n", program_name);
     printf("Note: nx should be divisible by VEC_LEN (%d) for best performance.\n", VEC_LEN);
 }
 
 int main(int argc, char **argv) {
-
-    // Check for help flag
-    if (argc > 1 && (strcmp(argv[1], "-h") == 0 || strcmp(argv[1], "--help") == 0)) {
-        print_help(argv[0]);
-        return 0;
-    }
 
     // Default grid size and number of iterations
     int nx = 512;
@@ -53,22 +48,33 @@ int main(int argc, char **argv) {
     int nz = 512;
     int nt = 100;
     // Default nw (z-window size) and align (leading dimension alignment)
+    // align defaults to BLOCK_DIM_X for optimal memory access
     int nw = (RADIUS <= 4) ? 128 : (RADIUS <= 6) ? 80 : 160;
-    int align = (RADIUS <= 4) ? 64 : (RADIUS <= 6) ? 1 : 64;
+    int align = (RADIUS == 1) ? 256 : (RADIUS == 2) ? 128 : 64;
 
-    // Parse command line arguments (if provided)
-    if (argc > 1)
-        nx = atof(argv[1]);
-    if (argc > 2)
-        ny = atof(argv[2]);
-    if (argc > 3)
-        nz = atof(argv[3]);
-    if (argc > 4)
-        nt = atof(argv[4]);
-    if (argc > 5)
-        nw = atof(argv[5]);
-    if (argc > 6)
-        align = atoi(argv[6]);
+    // Parse command line arguments
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "-nx") == 0 && i + 1 < argc) {
+            nx = atoi(argv[++i]);
+        } else if (strcmp(argv[i], "-ny") == 0 && i + 1 < argc) {
+            ny = atoi(argv[++i]);
+        } else if (strcmp(argv[i], "-nz") == 0 && i + 1 < argc) {
+            nz = atoi(argv[++i]);
+        } else if (strcmp(argv[i], "-nt") == 0 && i + 1 < argc) {
+            nt = atoi(argv[++i]);
+        } else if (strcmp(argv[i], "-nw") == 0 && i + 1 < argc) {
+            nw = atoi(argv[++i]);
+        } else if (strcmp(argv[i], "-align") == 0 && i + 1 < argc) {
+            align = atoi(argv[++i]);
+        } else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
+            print_help(argv[0]);
+            return 0;
+        } else {
+            printf("Unknown option: %s\n", argv[i]);
+            print_help(argv[0]);
+            return 1;
+        }
+    }
     
     printf("Settings: nx = %d ny = %d nz = %d nt = %d nw = %d align = %d\n",
             nx, ny, nz, nt, nw, align);
