@@ -77,7 +77,7 @@ void fd_coefficients_d2_order_16(float *dout, int R, float h) {
     dout[5]  =  (float)(8.0 / 165.0) * scaling;
     dout[6]  = -(float)(1.0 / 4.0) * scaling;
     dout[7]  =  (float)(16.0 / 9.0) * scaling;
-    dout[8]  = -(float)(1077749.0 / 352800.0) * scaling;
+    dout[8]  = -(float)(8746627.0 / 2787840.0) * scaling;
     dout[9]  = dout[7];
     dout[10] = dout[6];
     dout[11] = dout[5];

@@ -63,15 +63,17 @@ float max_absval_gpu(float *u, const float *v, int line, int slice, int x0, int 
     grid.y = ceil(y1, block.y);
     grid.z = ceil(z1, dimz);
 
-    float *d_out; 
+    float *d_out;
     HIP_CHECK( hipMalloc(&d_out, sizeof(float)) );
+    HIP_CHECK( hipMemset(d_out, 0, sizeof(float)) );
 
     max_absval_gpu_kernel<<<grid, block>>>(d_out, u, v, line, slice, x0, x1, y0, y1, z0, z1, dimz);
     HIP_CHECK(hipGetLastError());
-    float *out = new float[1];
 
-    HIP_CHECK(hipMemcpy(out, d_out, sizeof(float), hipMemcpyDeviceToHost));
-    return out[0];
+    float result;
+    HIP_CHECK(hipMemcpy(&result, d_out, sizeof(float), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipFree(d_out));
+    return result;
      
 }
 

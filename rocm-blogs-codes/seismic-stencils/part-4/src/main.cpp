@@ -28,7 +28,8 @@ void print_help(const char* program_name) {
     printf("  align   Alignment factor for leading dim  [default: 1]\n\n");
     printf("Compile-time settings (current build):\n");
     printf("  RADIUS  = %d (stencil radius, %s order accuracy)\n", RADIUS,
-           RADIUS == 1 ? "2nd" : RADIUS == 2 ? "4th" : RADIUS == 3 ? "6th" : "8th");
+           RADIUS == 1 ? "2nd" : RADIUS == 2 ? "4th" : RADIUS == 3 ? "6th" :
+           RADIUS == 4 ? "8th" : RADIUS == 6 ? "12th" : RADIUS == 8 ? "16th" : "unknown");
     printf("  VEC_LEN = %d (vector length, 2^VEC_EXP)\n\n", VEC_LEN);
     printf("Examples:\n");
     printf("  %s                           # 512^3 grid, 100 iterations\n", program_name);
@@ -51,22 +52,22 @@ int main(int argc, char **argv) {
     int ny = 512;
     int nz = 512;
     int nt = 100;
-    int nw = 1;
-    // Default alignment factor that the leading dimension needs to be a multiple of.
-    int align = 1;
+    // Default nw (z-window size) and align (leading dimension alignment)
+    int nw = (RADIUS <= 4) ? 128 : (RADIUS <= 6) ? 80 : 160;
+    int align = (RADIUS <= 4) ? 64 : (RADIUS <= 6) ? 1 : 64;
 
     // Parse command line arguments (if provided)
-    if (argc > 1) 
+    if (argc > 1)
         nx = atof(argv[1]);
-    if (argc > 2) 
+    if (argc > 2)
         ny = atof(argv[2]);
-    if (argc > 3) 
+    if (argc > 3)
         nz = atof(argv[3]);
-    if (argc > 4) 
+    if (argc > 4)
         nt = atof(argv[4]);
-    if (argc > 5) 
+    if (argc > 5)
         nw = atof(argv[5]);
-    if (argc > 6) 
+    if (argc > 6)
         align = atoi(argv[6]);
     
     printf("Settings: nx = %d ny = %d nz = %d nt = %d nw = %d align = %d\n",
@@ -94,6 +95,14 @@ int main(int argc, char **argv) {
         case 4:
             // 8th order
             fd_coefficients_d2_order_8(d, R, h);
+            break;
+        case 6:
+            // 12th order
+            fd_coefficients_d2_order_12(d, R, h);
+            break;
+        case 8:
+            // 16th order
+            fd_coefficients_d2_order_16(d, R, h);
             break;
         default:
             printf("ERROR: unsupported radius (-DRADIUS=%d), exiting program...\n", R);
@@ -154,13 +163,13 @@ int main(int argc, char **argv) {
         for (int i = 0; i < nt; ++i) {
             HIP_CHECK( hipDeviceSynchronize()                     );
             HIP_CHECK( hipEventRecord(start)                      );
-            baseline<R>(d_p_out, d_p_in, d, line, slice, R, nx + R, R, ny + R, R, R + nz, nw);
+            baseline<R>(d_p_out, d_p_in, d, line, slice, XWIN, nx + XWIN, R, ny + R, R, R + nz, nw);
             HIP_CHECK( hipEventRecord(stop)                       );
             HIP_CHECK( hipEventSynchronize(stop)                  );
             HIP_CHECK( hipEventElapsedTime(&elapsed, start, stop) );
             total_elapsed += elapsed;
         }
-        maxval = max_absval_gpu(d_p_out, d_p_ref, line, slice, R, nx + R, R, ny + R, R, nz + R);
+        maxval = max_absval_gpu(d_p_out, d_p_ref, line, slice, XWIN, nx + XWIN, R, ny + R, R, nz + R);
         printf("\tMaximum absolute pointwise difference: %g\n", maxval);
         printf("\tAverage kernel time: %g ms\n", total_elapsed / nt);
         printf("\tEffective memory bandwidth %g GB/s\n", total_bytes_xyz * nt / total_elapsed / 1e6);

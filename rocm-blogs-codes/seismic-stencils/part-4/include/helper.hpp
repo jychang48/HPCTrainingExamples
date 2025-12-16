@@ -19,21 +19,13 @@
     }                                                             \
 }
 
-// Table containing finite difference coefficients 
-template <int R> __constant__ float d_dx[2 * R + 1];
-template <int R> __constant__ float d_dy[2 * R + 1];
-template <int R> __constant__ float d_dz[2 * R + 1];
+// Initialization functions for finite difference coefficients
+// Declared here, defined in baseline_kernel.hip
+template <int R>
+void init_fd_xy_gpu(const float *dx, const float *dy);
 
 template <int R>
-void init_fd_xy_gpu(const float *dx, const float *dy) {
-    HIP_CHECK(hipMemcpyToSymbol(d_dx<R>, dx, (2 * R + 1) * sizeof(float)));
-    HIP_CHECK(hipMemcpyToSymbol(d_dy<R>, dy, (2 * R + 1) * sizeof(float)));
-}
- 
-template <int R>
-void init_fd_z_gpu(const float *d) {
-    HIP_CHECK(hipMemcpyToSymbol(d_dz<R>, d, (2 * R + 1) * sizeof(float)));
-}
+void init_fd_z_gpu(const float *d);
 
 // Vectorized floats
 #ifndef VEC_EXP
@@ -43,20 +35,45 @@ void init_fd_z_gpu(const float *d) {
 using vec = __attribute__((__vector_size__(VEC_LEN * sizeof(float)))) float;
 
 // x window stencil
+// XWIN must be >= RADIUS and a multiple of VEC_LEN for correct stencil computation
+// XWIN_VEC = XWIN / VEC_LEN (number of vector loads needed)
 #if VEC_LEN == 1
 #define XWIN RADIUS
 #define XWIN_VEC RADIUS
 #elif VEC_LEN == 2
-#if RADIUS > 2
-#define XWIN 4
-#define XWIN_VEC 2
-#else
+#if RADIUS <= 2
 #define XWIN 2
 #define XWIN_VEC 1
+#elif RADIUS <= 4
+#define XWIN 4
+#define XWIN_VEC 2
+#elif RADIUS <= 6
+#define XWIN 6
+#define XWIN_VEC 3
+#else
+#define XWIN 8
+#define XWIN_VEC 4
+#endif
+#elif VEC_LEN == 4
+#if RADIUS <= 4
+#define XWIN 4
+#define XWIN_VEC 1
+#elif RADIUS <= 8
+#define XWIN 8
+#define XWIN_VEC 2
+#else
+#define XWIN 12
+#define XWIN_VEC 3
 #endif
 #else
+// VEC_LEN >= 8
+#if RADIUS <= VEC_LEN
 #define XWIN VEC_LEN
 #define XWIN_VEC 1
+#else
+#define XWIN (2 * VEC_LEN)
+#define XWIN_VEC 2
+#endif
 #endif
 #define XWIN_OFF (XWIN-RADIUS)
 
