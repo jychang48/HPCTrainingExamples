@@ -110,7 +110,9 @@ __global__ void optimized_v1_kernel_impl(float *p_out, const float *p_in, int li
     }
 
     // Prime the xy pipeline
+    #pragma unroll
     for (int r = R; r < 2 * R; ++r) {
+        #pragma unroll
         for (int r2 = 0; r2 < 2*XWIN_VEC + 1; ++r2)
             x_win_vec[r2] = p_in_vec[0 - XWIN_VEC + r2];
 
@@ -133,7 +135,9 @@ __global__ void optimized_v1_kernel_impl(float *p_out, const float *p_in, int li
 
         // Compute xy stencils with explicit FMA (inlined coefficients)
         out[r-R] = {0.0f};
+        #pragma unroll
         for (int r2 = 0; r2 <= 2 * R; ++r2) {
+            #pragma unroll
             for (int ii = 0; ii < VEC_LEN; ++ii) {
                 out[r-R][ii] = __builtin_fmaf(smem[spos + (r2 - R) * BLOCK_DIM_X][ii], COEFF_Y(r2), out[r-R][ii]);
                 out[r-R][ii] = __builtin_fmaf(x_win[XWIN_OFF + r2 + ii], COEFF_X(r2), out[r-R][ii]);
@@ -153,7 +157,7 @@ __global__ void optimized_v1_kernel_impl(float *p_out, const float *p_in, int li
         // Step 2: Update z sliding window
         w[2*R] = x_win_vec[XWIN_VEC];
 
-        // Step 3: COMPUTE Z-STENCIL EARLY with explicit FMA (ILP: overlaps with barrier)
+        // Step 3: COMPUTE Z-STENCIL EARLY (ILP: overlaps with barrier)
         vec lapz = {0.0f};
         for (int r = 0; r <= 2 * R; ++r) {
             for (int ii = 0; ii < VEC_LEN; ++ii) {
@@ -184,22 +188,54 @@ __global__ void optimized_v1_kernel_impl(float *p_out, const float *p_in, int li
 #endif
 #endif
         }
-        __syncthreads();
 
-        // Step 5: Compute XY stencils with explicit FMA (needs LDS)
-        vec lapxy = {0.0f};
+#if RADIUS == 8
+        // For R=8: Compute x-stencil BEFORE second barrier (overlaps with LDS store latency)
+        vec lapx = {0.0f};
+        #pragma unroll
         for (int r = 0; r <= 2 * R; ++r) {
+            #pragma unroll
             for (int ii = 0; ii < VEC_LEN; ++ii) {
-                lapxy[ii] = __builtin_fmaf(smem[spos + (r - R) * BLOCK_DIM_X][ii], COEFF_Y(r), lapxy[ii]);
-                lapxy[ii] = __builtin_fmaf(x_win[XWIN_OFF + r + ii], COEFF_X(r), lapxy[ii]);
+                lapx[ii] = __builtin_fmaf(x_win[XWIN_OFF + r + ii], COEFF_X(r), lapx[ii]);
             }
         }
+#endif
+
+        __syncthreads();
+
+#if RADIUS == 8
+        // Step 5: Compute Y stencil only (x already computed above)
+        vec lapy = {0.0f};
+        #pragma unroll
+        for (int r = 0; r <= 2 * R; ++r) {
+            #pragma unroll
+            for (int ii = 0; ii < VEC_LEN; ++ii) {
+                lapy[ii] = __builtin_fmaf(smem[spos + (r - R) * BLOCK_DIM_X][ii], COEFF_Y(r), lapy[ii]);
+            }
+        }
+        // Combine x + y
+        #pragma unroll
+        for (int ii = 0; ii < VEC_LEN; ++ii) {
+            lapy[ii] += lapx[ii];
+        }
+#else
+        // For other radii: Compute XY stencils together (original approach)
+        vec lapy = {0.0f};
+        #pragma unroll
+        for (int r = 0; r <= 2 * R; ++r) {
+            #pragma unroll
+            for (int ii = 0; ii < VEC_LEN; ++ii) {
+                lapy[ii] = __builtin_fmaf(smem[spos + (r - R) * BLOCK_DIM_X][ii], COEFF_Y(r), lapy[ii]);
+                lapy[ii] = __builtin_fmaf(x_win[XWIN_OFF + r + ii], COEFF_X(r), lapy[ii]);
+            }
+        }
+#endif
 
         // Step 6: Combine z + xy
         for (int ii = 0; ii < VEC_LEN; ++ii) {
             out[0][ii] += lapz[ii];
         }
-        out[R] = lapxy;
+        out[R] = lapy;
 
         // Step 7: Write result
         if (j < y1)
