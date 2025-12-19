@@ -130,7 +130,7 @@ int main(int argc, char **argv) {
     const size_t m = (size_t)mx * (size_t)my * (size_t)mz;
 
     // Align the offset, if any
-    int offset = align ? align - R : 0;
+    int offset = align ? align - XWIN : 0;
     offset = offset < 0 ? 0 : offset;
 
     float *d_p_in; alloc(&d_p_in, m, offset);
