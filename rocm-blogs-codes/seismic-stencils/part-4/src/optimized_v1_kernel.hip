@@ -19,23 +19,23 @@ template void init_fd_optimized_v1<RADIUS>(const float*);
 
 // Thread block dimensions
 #if RADIUS == 1
-#define OPT_BLOCK_DIM_X 256
-#define OPT_BLOCK_DIM_Y 1
+#define BLOCK_DIM_X 256
+#define BLOCK_DIM_Y 1
 #elif RADIUS == 2
-#define OPT_BLOCK_DIM_X 128
-#define OPT_BLOCK_DIM_Y 2
+#define BLOCK_DIM_X 128
+#define BLOCK_DIM_Y 2
 #elif RADIUS == 3
-#define OPT_BLOCK_DIM_X 64
-#define OPT_BLOCK_DIM_Y 3
+#define BLOCK_DIM_X 64
+#define BLOCK_DIM_Y 3
 #elif RADIUS == 4
-#define OPT_BLOCK_DIM_X 64
-#define OPT_BLOCK_DIM_Y 4
+#define BLOCK_DIM_X 64
+#define BLOCK_DIM_Y 4
 #elif RADIUS == 6
-#define OPT_BLOCK_DIM_X 32
-#define OPT_BLOCK_DIM_Y 4
+#define BLOCK_DIM_X 32
+#define BLOCK_DIM_Y 4
 #elif RADIUS == 8
-#define OPT_BLOCK_DIM_X 32
-#define OPT_BLOCK_DIM_Y 4
+#define BLOCK_DIM_X 32
+#define BLOCK_DIM_Y 4
 #else
 #error "Unsupported RADIUS value"
 #endif
@@ -49,7 +49,7 @@ template void init_fd_optimized_v1<RADIUS>(const float*);
  * 3. Preload coefficients into registers
  */
 template <int R>
-__launch_bounds__((OPT_BLOCK_DIM_X) * (OPT_BLOCK_DIM_Y))
+__launch_bounds__((BLOCK_DIM_X) * (BLOCK_DIM_Y))
 __global__ void optimized_v1_kernel_impl(float *p_out, const float *p_in, int line, int
         slice, int x0, int x1, int y0, int y1, int z0, int z1, int dimz) {
 
@@ -71,14 +71,14 @@ __global__ void optimized_v1_kernel_impl(float *p_out, const float *p_in, int li
     vec *p_out_vec = reinterpret_cast<vec*>(p_out);
 
     // LDS for y-direction stencil
-    const int lds_y = OPT_BLOCK_DIM_Y + 2*R;
-#if OPT_BLOCK_DIM_Y == RADIUS
+    const int lds_y = BLOCK_DIM_Y + 2*R;
+#if BLOCK_DIM_Y == RADIUS
     const int sj = y0 + threadIdx.y;
-    size_t spos = threadIdx.x + sj * OPT_BLOCK_DIM_X;
+    size_t spos = threadIdx.x + sj * BLOCK_DIM_X;
 #else
-    size_t spos = threadIdx.x + (R + threadIdx.y) * OPT_BLOCK_DIM_X;
+    size_t spos = threadIdx.x + (R + threadIdx.y) * BLOCK_DIM_X;
 #endif
-    __shared__ vec smem[OPT_BLOCK_DIM_X * lds_y];
+    __shared__ vec smem[BLOCK_DIM_X * lds_y];
 
     // Preload FD coefficients from constant memory into registers
     float coeff_x[2 * R + 1];
@@ -116,15 +116,16 @@ __global__ void optimized_v1_kernel_impl(float *p_out, const float *p_in, int li
 
         __syncthreads();
         {
-#if OPT_BLOCK_DIM_Y == RADIUS
-            smem[spos - (OPT_BLOCK_DIM_X * R)] = p_in_vec[0 - R * line_vec];
+#if BLOCK_DIM_Y == RADIUS
+            smem[spos - (BLOCK_DIM_X * R)] = p_in_vec[0 - R * line_vec];
             smem[spos] = x_win_vec[XWIN_VEC];
-            smem[spos + (OPT_BLOCK_DIM_X * OPT_BLOCK_DIM_Y)] = p_in_vec[0 + line_vec * OPT_BLOCK_DIM_Y];
+            smem[spos + (BLOCK_DIM_X * BLOCK_DIM_Y)] = p_in_vec[0 + line_vec * BLOCK_DIM_Y];
 #else
             smem[spos] = x_win_vec[XWIN_VEC];
-            for (int h = threadIdx.y; h < R; h += OPT_BLOCK_DIM_Y) {
-                smem[threadIdx.x + h * OPT_BLOCK_DIM_X] = p_in_vec[(h - int(threadIdx.y) - R) * line_vec];
-                smem[threadIdx.x + (R + OPT_BLOCK_DIM_Y + h) * OPT_BLOCK_DIM_X] = p_in_vec[(OPT_BLOCK_DIM_Y + h - int(threadIdx.y)) * line_vec];
+            // Loop form in initial load (optimal for R=8)
+            for (int h = threadIdx.y; h < R; h += BLOCK_DIM_Y) {
+                smem[threadIdx.x + h * BLOCK_DIM_X] = p_in_vec[(h - int(threadIdx.y) - R) * line_vec];
+                smem[threadIdx.x + (R + BLOCK_DIM_Y + h) * BLOCK_DIM_X] = p_in_vec[(BLOCK_DIM_Y + h - int(threadIdx.y)) * line_vec];
             }
 #endif
         }
@@ -134,7 +135,7 @@ __global__ void optimized_v1_kernel_impl(float *p_out, const float *p_in, int li
         out[r-R] = {0.0f};
         for (int r2 = 0; r2 <= 2 * R; ++r2) {
             for (int ii = 0; ii < VEC_LEN; ++ii) {
-                out[r-R][ii] = __builtin_fmaf(smem[spos + (r2 - R) * OPT_BLOCK_DIM_X][ii], COEFF_Y(r2), out[r-R][ii]);
+                out[r-R][ii] = __builtin_fmaf(smem[spos + (r2 - R) * BLOCK_DIM_X][ii], COEFF_Y(r2), out[r-R][ii]);
                 out[r-R][ii] = __builtin_fmaf(x_win[XWIN_OFF + r2 + ii], COEFF_X(r2), out[r-R][ii]);
             }
         }
@@ -163,25 +164,22 @@ __global__ void optimized_v1_kernel_impl(float *p_out, const float *p_in, int li
         // Step 4: Load y into LDS (barrier here)
         __syncthreads();
         {
-#if OPT_BLOCK_DIM_Y == RADIUS
-            smem[spos - (OPT_BLOCK_DIM_X * R)] = p_in_vec[0 - R * line_vec];
+#if BLOCK_DIM_Y == RADIUS
+            smem[spos - (BLOCK_DIM_X * R)] = p_in_vec[0 - R * line_vec];
             smem[spos] = x_win_vec[XWIN_VEC];
-            smem[spos + (OPT_BLOCK_DIM_X * OPT_BLOCK_DIM_Y)] = p_in_vec[0 + line_vec * OPT_BLOCK_DIM_Y];
+            smem[spos + (BLOCK_DIM_X * BLOCK_DIM_Y)] = p_in_vec[0 + line_vec * BLOCK_DIM_Y];
 #else
             smem[spos] = x_win_vec[XWIN_VEC];
 #if RADIUS == 8
-            // Explicit unrolling for R=8 only (all threads need exactly 2 iterations)
-            // h=threadIdx.y (first iteration)
-            smem[threadIdx.x + threadIdx.y * OPT_BLOCK_DIM_X] = p_in_vec[-R * line_vec];
-            smem[threadIdx.x + (R + OPT_BLOCK_DIM_Y + threadIdx.y) * OPT_BLOCK_DIM_X] = p_in_vec[OPT_BLOCK_DIM_Y * line_vec];
-            // h=threadIdx.y+OPT_BLOCK_DIM_Y (second iteration)
-            smem[threadIdx.x + (threadIdx.y + OPT_BLOCK_DIM_Y) * OPT_BLOCK_DIM_X] = p_in_vec[(OPT_BLOCK_DIM_Y - R) * line_vec];
-            smem[threadIdx.x + (R + 2*OPT_BLOCK_DIM_Y + threadIdx.y) * OPT_BLOCK_DIM_X] = p_in_vec[2*OPT_BLOCK_DIM_Y * line_vec];
+            // Explicit unrolling for R=8 in main z-loop
+            smem[threadIdx.x + threadIdx.y * BLOCK_DIM_X] = p_in_vec[-R * line_vec];
+            smem[threadIdx.x + (R + BLOCK_DIM_Y + threadIdx.y) * BLOCK_DIM_X] = p_in_vec[BLOCK_DIM_Y * line_vec];
+            smem[threadIdx.x + (threadIdx.y + BLOCK_DIM_Y) * BLOCK_DIM_X] = p_in_vec[(BLOCK_DIM_Y - R) * line_vec];
+            smem[threadIdx.x + (R + 2*BLOCK_DIM_Y + threadIdx.y) * BLOCK_DIM_X] = p_in_vec[2*BLOCK_DIM_Y * line_vec];
 #else
-            // Loop form for other radii (variable iteration count per thread)
-            for (int h = threadIdx.y; h < R; h += OPT_BLOCK_DIM_Y) {
-                smem[threadIdx.x + h * OPT_BLOCK_DIM_X] = p_in_vec[(h - int(threadIdx.y) - R) * line_vec];
-                smem[threadIdx.x + (R + OPT_BLOCK_DIM_Y + h) * OPT_BLOCK_DIM_X] = p_in_vec[(OPT_BLOCK_DIM_Y + h - int(threadIdx.y)) * line_vec];
+            for (int h = threadIdx.y; h < R; h += BLOCK_DIM_Y) {
+                smem[threadIdx.x + h * BLOCK_DIM_X] = p_in_vec[(h - int(threadIdx.y) - R) * line_vec];
+                smem[threadIdx.x + (R + BLOCK_DIM_Y + h) * BLOCK_DIM_X] = p_in_vec[(BLOCK_DIM_Y + h - int(threadIdx.y)) * line_vec];
             }
 #endif
 #endif
@@ -192,7 +190,7 @@ __global__ void optimized_v1_kernel_impl(float *p_out, const float *p_in, int li
         vec lapxy = {0.0f};
         for (int r = 0; r <= 2 * R; ++r) {
             for (int ii = 0; ii < VEC_LEN; ++ii) {
-                lapxy[ii] = __builtin_fmaf(smem[spos + (r - R) * OPT_BLOCK_DIM_X][ii], COEFF_Y(r), lapxy[ii]);
+                lapxy[ii] = __builtin_fmaf(smem[spos + (r - R) * BLOCK_DIM_X][ii], COEFF_Y(r), lapxy[ii]);
                 lapxy[ii] = __builtin_fmaf(x_win[XWIN_OFF + r + ii], COEFF_X(r), lapxy[ii]);
             }
         }
@@ -228,7 +226,7 @@ void optimized_v1(float *p_out, const float *p_in, const float *d, int line, int
 
     dimwin = dimwin == -1 ? z1 - z0 : dimwin;
 
-    dim3 block (OPT_BLOCK_DIM_X, OPT_BLOCK_DIM_Y);
+    dim3 block (BLOCK_DIM_X, BLOCK_DIM_Y);
     dim3 grid;
     grid.x = ceil(x1 - x0, VEC_LEN * block.x);
     grid.y = ceil(y1 - y0, block.y);
@@ -241,5 +239,5 @@ void optimized_v1(float *p_out, const float *p_in, const float *d, int line, int
 
 template void optimized_v1<RADIUS>(float*, const float*, const float*, int, int, int, int, int, int, int, int, int);
 
-#undef OPT_BLOCK_DIM_X
-#undef OPT_BLOCK_DIM_Y
+#undef BLOCK_DIM_X
+#undef BLOCK_DIM_Y
