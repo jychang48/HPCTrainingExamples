@@ -69,7 +69,7 @@ endef
 
 # Function to get object files for a specific radius/vec combination
 define get_objs
-$(call get_build_subdir,$1,$2)/main.o $(call get_build_subdir,$1,$2)/baseline_kernel.o $(call get_build_subdir,$1,$2)/optimized_v1_kernel.o
+$(call get_build_subdir,$1,$2)/main.o $(call get_build_subdir,$1,$2)/baseline_kernel.o $(call get_build_subdir,$1,$2)/optimized_v1_kernel.o $(call get_build_subdir,$1,$2)/optimized_v2_kernel.o
 endef
 
 # Function to get HIPFLAGS for a specific radius/vec combination
@@ -115,6 +115,15 @@ endef
 
 # Generate compile rules for each radius/vec combination
 $(foreach r,$(RADII),$(foreach v,$(VECS),$(eval $(call compile_optimized_v1_kernel_rule,$r,$v))))
+
+# Rule to compile optimized_v2_kernel.hip for a specific radius/vec combination
+define compile_optimized_v2_kernel_rule
+$(call get_build_subdir,$1,$2)/optimized_v2_kernel.o: $(SRC_DIR)/optimized_v2_kernel.hip | $(call get_build_subdir,$1,$2)
+	cd $$(call get_build_subdir,$1,$2) && $$(HIPC) $$(call get_hipflags,$1,$2) -c $$(CURDIR)/$$< -o optimized_v2_kernel.o
+endef
+
+# Generate compile rules for each radius/vec combination
+$(foreach r,$(RADII),$(foreach v,$(VECS),$(eval $(call compile_optimized_v2_kernel_rule,$r,$v))))
 
 # Rule to create build subdirectory
 define mkdir_rule

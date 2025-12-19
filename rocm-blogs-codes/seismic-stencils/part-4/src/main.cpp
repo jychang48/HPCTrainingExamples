@@ -13,6 +13,7 @@
 #include "compare.hpp"
 #include "baseline_kernel.hpp"
 #include "optimized_v1_kernel.hpp"
+#include "optimized_v2_kernel.hpp"
 #include "fd_coefficients.hpp"
 #include "initialize.hpp"
 
@@ -152,6 +153,7 @@ int main(int argc, char **argv) {
     init_fd_xy_gpu<R>(d, d);
     init_fd_z_gpu<R>(d);
     init_fd_optimized_v1<R>(d);
+    init_fd_optimized_v2<R>(d);
     
     // Performance metrics
     float total_elapsed, elapsed, maxval;
@@ -196,6 +198,35 @@ int main(int argc, char **argv) {
             HIP_CHECK( hipDeviceSynchronize()                     );
             HIP_CHECK( hipEventRecord(start)                      );
             optimized_v1<R>(d_p_out, d_p_in, d, line, slice, XWIN, nx + XWIN, R, ny + R, R, R + nz, nw);
+            HIP_CHECK( hipEventRecord(stop)                       );
+            HIP_CHECK( hipEventSynchronize(stop)                  );
+            HIP_CHECK( hipEventElapsedTime(&elapsed, start, stop) );
+            total_elapsed += elapsed;
+        }
+        // Verify optimized kernel produced non-zero output (compare vs zeros)
+        float *d_zeros;
+        HIP_CHECK(hipMalloc(&d_zeros, m * sizeof(float)));
+        HIP_CHECK(hipMemset(d_zeros, 0, m * sizeof(float)));
+        float opt_vs_zero = max_absval_gpu(d_p_out, d_zeros, line, slice, XWIN, nx + XWIN, R, ny + R, R, nz + R);
+        HIP_CHECK(hipFree(d_zeros));
+        printf("\tOutput magnitude (vs zeros): %g\n", opt_vs_zero);
+
+        maxval = max_absval_gpu(d_p_out, d_p_ref, line, slice, XWIN, nx + XWIN, R, ny + R, R, nz + R);
+        printf("\tMaximum absolute pointwise difference (vs baseline): %g\n", maxval);
+        printf("\tAverage kernel time: %g ms\n", total_elapsed / nt);
+        printf("\tEffective memory bandwidth %g GB/s\n", total_bytes_xyz * nt / total_elapsed / 1e6);
+    }
+
+    printf("\nApplying optimized_v2 stencil kernel...\n");
+    if (nx % VEC_LEN) {
+        printf("\nWarning: nx = %d not divisible by vec length %d, skipping\n", nx, VEC_LEN);
+    } else {
+        HIP_CHECK(hipMemset(d_p_out, 0, m * sizeof(float)));
+        total_elapsed = 0;
+        for (int i = 0; i < nt; ++i) {
+            HIP_CHECK( hipDeviceSynchronize()                     );
+            HIP_CHECK( hipEventRecord(start)                      );
+            optimized_v2<R>(d_p_out, d_p_in, d, line, slice, XWIN, nx + XWIN, R, ny + R, R, R + nz, nw);
             HIP_CHECK( hipEventRecord(stop)                       );
             HIP_CHECK( hipEventSynchronize(stop)                  );
             HIP_CHECK( hipEventElapsedTime(&elapsed, start, stop) );
